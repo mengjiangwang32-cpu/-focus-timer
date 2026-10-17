@@ -20,8 +20,32 @@ jobs:
       - run: npm test
       - run: npm run build
       - run: npm run test:ui -- --reporter=github
-      - run: npm run dist:win
-      - run: npm run pack:win
+      - name: Build Windows installer
+        shell: pwsh
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $false
+          & npm.cmd run dist:win *> installer-build.log
+          $buildExit = $LASTEXITCODE
+          Get-Content installer-build.log
+          if ($buildExit -ne 0) {
+            $details = (Get-Content installer-build.log -Tail 70) -join "`n"
+            $details = $details.Replace('%', '%25').Replace("`r", '%0D').Replace("`n", '%0A')
+            Write-Output "::error title=Windows installer build::$details"
+            exit $buildExit
+          }
+      - name: Build Windows ZIP
+        shell: pwsh
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $false
+          & npm.cmd run pack:win *> zip-build.log
+          $buildExit = $LASTEXITCODE
+          Get-Content zip-build.log
+          if ($buildExit -ne 0) {
+            $details = (Get-Content zip-build.log -Tail 70) -join "`n"
+            $details = $details.Replace('%', '%25').Replace("`r", '%0D').Replace("`n", '%0A')
+            Write-Output "::error title=Windows ZIP build::$details"
+            exit $buildExit
+          }
       - name: Create source archive and checksums
         shell: pwsh
         run: |
@@ -61,4 +85,7 @@ jobs:
         if: failure()
         with:
           name: desktop-test-results
-          path: test-results
+          path: |
+            test-results
+            installer-build.log
+            zip-build.log
