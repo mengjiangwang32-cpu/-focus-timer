@@ -2,6 +2,10 @@
 
 一个中文、免费、离线的 Windows 每日任务与专注计时软件。独立桌面窗口，无需账号、服务器、AI 接口或运行开发助手。
 
+**下载软件：**[Windows 安装包](https://github.com/mengjiangwang32-cpu/-focus-timer/releases/download/shiguang-v1.0.0/Shiguang-Focus-1.0.0-Windows-x64.exe) · [Windows 免安装 ZIP](https://github.com/mengjiangwang32-cpu/-focus-timer/releases/download/shiguang-v1.0.0/Shiguang-Focus-1.0.0-Windows-x64.zip) · [发布页面与校验值](https://github.com/mengjiangwang32-cpu/-focus-timer/releases/tag/shiguang-v1.0.0)
+
+请在 Windows 电脑上下载。安装包双击安装；ZIP 需完整解压后运行里面的 `拾光专注.exe`。源码包供开发者使用，普通使用无需下载源码或配置开发环境。
+
 ![每日任务界面](docs/screenshots/每日任务.png)
 
 提供每日任务、手动完成、自定义时长、纯数字全屏、暂停和超时、每日重复、拖动排序、优先级、备注与子任务、历史统计及本地备份。开始过的任务固定预计预算，多次计时接着使用剩余预算。
