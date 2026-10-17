@@ -19,7 +19,7 @@ jobs:
       - run: node node_modules/electron/install.js
       - run: npm test
       - run: npm run build
-      - run: npm run test:ui
+      - run: npm run test:ui -- --reporter=github
       - run: npm run dist:win
       - run: npm run pack:win
       - name: Create source archive and checksums
