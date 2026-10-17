@@ -2,6 +2,7 @@ import { test, expect, _electron as electron } from '@playwright/test';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { spawnSync } from 'node:child_process';
 
 let desktop, page, directory, temporaryRoot;
 async function launch() {
@@ -117,7 +118,13 @@ test('T16/T17: close/reopen, crash recovery and simulated power suspend', async 
   await page.waitForTimeout(500); expect((await state()).sessions[0].elapsedMs).toBe(saved);
   await command({ type: 'resume' }); await page.waitForTimeout(2500);
   const crashed = new Promise(resolve => desktop.process().once('exit', resolve));
-  desktop.process().kill('SIGKILL'); await crashed; await launch();
+  if (process.platform === 'win32') {
+    // Task Manager's End task terminates the entire Electron group. Killing
+    // only the parent leaves Chromium children holding the Windows profile.
+    const result = spawnSync('taskkill.exe', ['/PID', String(desktop.process().pid), '/T', '/F'], { encoding: 'utf8' });
+    if (result.status !== 0) throw new Error(`Could not simulate a full Windows crash: ${result.stderr || result.error}`);
+  } else desktop.process().kill('SIGKILL');
+  await crashed; await launch();
   s = await state(); expect(s.active.paused).toBe(true); expect(s.sessions[0].elapsedMs).toBeGreaterThan(saved);
   await command({ type: 'resume' });
   await desktop.evaluate(({ powerMonitor }) => powerMonitor.emit('suspend'));
