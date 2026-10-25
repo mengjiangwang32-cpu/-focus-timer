@@ -2,7 +2,7 @@ name: Build Windows desktop
 on:
   workflow_dispatch:
   push:
-    branches: ['codex/shiguang-v1']
+    branches: ['codex/shiguang-v1.1']
     tags: ['v*']
 jobs:
   build:
@@ -15,6 +15,12 @@ jobs:
         with:
           node-version: '24'
           cache: npm
+      - name: Read release version
+        shell: pwsh
+        run: |
+          $version = node -p "require('./package.json').version"
+          if ($version -notmatch '^\d+\.\d+\.\d+$') { throw 'Invalid release version' }
+          "FOCUS_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
       - run: npm ci
       - run: node node_modules/electron/install.js
       - run: npm test
@@ -33,6 +39,19 @@ jobs:
             Write-Output "::error title=Windows installer build::$details"
             exit $buildExit
           }
+      - name: Verify upgrade from installed 1.0
+        shell: pwsh
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $false
+          & npm.cmd run test:upgrade *> upgrade-test.log
+          $testExit = $LASTEXITCODE
+          Get-Content upgrade-test.log
+          if ($testExit -ne 0) {
+            $details = (Get-Content upgrade-test.log -Tail 90) -join "`n"
+            $details = $details.Replace('%', '%25').Replace("`r", '%0D').Replace("`n", '%0A')
+            Write-Output "::error title=Windows overwrite upgrade::$details"
+            exit $testExit
+          }
       - name: Build Windows ZIP
         shell: pwsh
         run: |
@@ -49,12 +68,14 @@ jobs:
       - name: Create source archive and checksums
         shell: pwsh
         run: |
-          git archive --format=zip --output=release/Shiguang-Focus-1.0.0-Source.zip HEAD
+          git archive --format=zip --output="release/Shiguang-Focus-$($env:FOCUS_VERSION)-Source.zip" HEAD
           if ($LASTEXITCODE -ne 0) { throw 'Source archive failed' }
-          Get-ChildItem release/Shiguang-Focus-1.0.0-* -File |
-            Where-Object { $_.Extension -in '.exe', '.zip' } |
+          Get-ChildItem "release/Shiguang-Focus-$($env:FOCUS_VERSION)-*" -File |
+            Where-Object { ($_.Extension -in @('.exe', '.zip')) -and $_.Name -notlike '*.__uninstaller.*' } |
             ForEach-Object { "$( (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower() )  $($_.Name)" } |
             Set-Content release/SHA256SUMS.txt -Encoding utf8
+          $upgradeHash = (Get-FileHash release/upgrade-verification.json -Algorithm SHA256).Hash.ToLower()
+          "$upgradeHash  upgrade-verification.json" | Add-Content release/SHA256SUMS.txt -Encoding utf8
       - uses: actions/upload-artifact@v4
         with:
           name: Shiguang-Focus-Windows-x64
@@ -62,24 +83,26 @@ jobs:
             release/*.exe
             release/*.zip
             release/SHA256SUMS.txt
+            release/upgrade-verification.json
       - name: Publish download files
-        if: github.ref == 'refs/heads/codex/shiguang-v1'
+        if: github.ref == 'refs/heads/codex/shiguang-v1.1'
         shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           $PSNativeCommandUseErrorActionPreference = $false
-          $tag = 'shiguang-v1.0.0'
+          $tag = "shiguang-v$($env:FOCUS_VERSION)"
           gh release view $tag --repo $env:GITHUB_REPOSITORY *> $null
           if ($LASTEXITCODE -eq 0) { throw 'This version already exists. Refusing to overwrite it.' }
           gh release create $tag `
-            'release/Shiguang-Focus-1.0.0-Windows-x64.exe' `
-            'release/Shiguang-Focus-1.0.0-Windows-x64.zip' `
-            'release/Shiguang-Focus-1.0.0-Source.zip' `
+            "release/Shiguang-Focus-$($env:FOCUS_VERSION)-Windows-x64.exe" `
+            "release/Shiguang-Focus-$($env:FOCUS_VERSION)-Windows-x64.zip" `
+            "release/Shiguang-Focus-$($env:FOCUS_VERSION)-Source.zip" `
             'release/SHA256SUMS.txt' `
+            'release/upgrade-verification.json' `
             --repo $env:GITHUB_REPOSITORY `
             --target $env:GITHUB_SHA `
-            --title '拾光专注 1.0.0' `
+            --title "拾光专注 $($env:FOCUS_VERSION)" `
             --notes-file 'docs/发布说明.md'
           if ($LASTEXITCODE -ne 0) { throw 'Release upload failed' }
       - uses: actions/upload-artifact@v4
@@ -90,3 +113,4 @@ jobs:
             test-results
             installer-build.log
             zip-build.log
+            upgrade-test.log

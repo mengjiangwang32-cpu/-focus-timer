@@ -91,7 +91,7 @@ test('T12: manual order persists and priority edits do not reorder', () => {
 });
 test('T13/T17: daily templates generate once, no missed-day backfill, independent child IDs', () => {
   const f = fixture(), t = f.add({ subtasks: [{ id: 'sub', title: '拉伸', done: false }] }, true);
-  f.engine.dispatch({ type: 'subtask', id: t.id, subtaskId: 'sub', done: true }); f.start(t.id); f.advance(3000);
+  f.engine.dispatch({ type: 'subtask', id: t.id, subtaskId: t.subtasks[0].id, done: true }); f.start(t.id); f.advance(3000);
   f.setWall('2026-10-20T00:00:00'); f.engine.ensureToday(); f.engine.ensureToday();
   assert.equal(f.engine.state.tasks.length, 2);
   const next = f.engine.state.tasks[1];

@@ -1,12 +1,14 @@
 {
   "name": "shiguang-focus",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
   "description": "拾光专注 · 本地每日任务与专注计时",
   "author": "Focus Timer contributors",
   "license": "MIT",
   "type": "module",
-  "engines": { "node": ">=24" },
+  "engines": {
+    "node": ">=24"
+  },
   "main": "electron/main.js",
   "scripts": {
     "dev": "node scripts/dev.mjs",
@@ -16,7 +18,8 @@
     "test:ui": "playwright test",
     "pack:win": "npm run build && electron-builder --win zip --x64 --publish never",
     "dist:win": "npm run build && electron-builder --win nsis --x64 --publish never",
-    "pack:linux": "npm run build && electron-builder --linux dir --x64 --publish never"
+    "pack:linux": "npm run build && electron-builder --linux dir --x64 --publish never",
+    "test:upgrade": "node scripts/test-windows-upgrade.mjs"
   },
   "dependencies": {
     "lucide-react": "^0.468.0",
@@ -32,11 +35,26 @@
   "build": {
     "appId": "cn.shiguang.focus",
     "productName": "拾光专注",
-    "directories": { "output": "release" },
-    "files": ["dist/**", "electron/**", "src/core/**", "assets/**", "package.json"],
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**",
+      "electron/**",
+      "src/core/**",
+      "assets/**",
+      "package.json"
+    ],
     "asar": true,
     "extraFiles": [
-      { "from": "windows", "to": ".", "filter": ["创建桌面快捷方式.vbs", "使用说明.txt"] }
+      {
+        "from": "windows",
+        "to": ".",
+        "filter": [
+          "创建桌面快捷方式.vbs",
+          "使用说明.txt"
+        ]
+      }
     ],
     "win": {
       "icon": "assets/icon.ico",
@@ -51,7 +69,9 @@
       "createStartMenuShortcut": true,
       "shortcutName": "拾光专注",
       "deleteAppDataOnUninstall": false,
-      "installerLanguages": ["zh_CN"],
+      "installerLanguages": [
+        "zh_CN"
+      ],
       "language": "2052"
     }
   }

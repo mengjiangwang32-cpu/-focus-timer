@@ -1,4 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { WEEKDAYS, isDue, nextOccurrences, scheduleLabel, validateSchedule } from './core/schedule.js';
+import { validateDate, weekday } from './core/calendar.js';
 import { Timer, LayoutGrid, ChartColumn, Repeat2, Settings, ChevronLeft, ChevronRight, Plus, Play, Pause, Maximize, Check, ArrowUpRight, GripVertical, X, ArrowUp, ArrowDown, CircleCheck, Clock3, Archive, RotateCcw, Download, Upload, FolderOpen, Volume2, Leaf, ChevronDown, Pencil, Square, ArrowRight, ShieldCheck, CalendarDays, CircleHelp, ListChecks } from 'lucide-react';
 
 const api = window.focusApp;
@@ -86,7 +88,7 @@ export default function App() {
     notify(task.completed ? '已取消完成，用时记录已保留' : '任务已完成，辛苦了');
   };
   const archive = async task => {
-    if (await confirm({ message: `归档「${task.title}」？`, detail: '任务会从清单隐藏，用时和历史统计继续保留。可在“已归档”中恢复。每日重复模板不会因此停用。', accept: '归档任务' })) await cmd({ type: 'archive', id: task.id });
+    if (await confirm({ message: `归档「${task.title}」？`, detail: '任务会从清单隐藏，用时和历史统计继续保留。可在“已归档”中恢复。对应的重复计划不会因此停用。', accept: '归档任务' })) await cmd({ type: 'archive', id: task.id });
   };
   const reorder = async (source, target) => {
     if (!source || source === target) return;
@@ -121,13 +123,13 @@ export default function App() {
       <div className="brand"><div className="brand-icon"><Timer size={23} strokeWidth={1.8} /></div><div><strong>拾光专注</strong><span>把时间，留给重要的事</span></div></div>
       <div className="workspace-label">我的工作台</div>
       <nav aria-label="主导航">
-        {[['tasks', LayoutGrid, '每日任务'], ['history', ChartColumn, '历史与统计'], ['templates', Repeat2, '每日重复']].map(([id, Icon, label]) => <button key={id} aria-label={label} className={page === id ? 'selected' : ''} onClick={() => switchPage(id)}><Icon size={19} /><span>{label}</span>{id === 'tasks' && <span className="nav-count">{state.tasks.filter(t => t.date === today && !t.completed && !t.archived).length}</span>}</button>)}
+        {[['tasks', LayoutGrid, '每日任务'], ['history', ChartColumn, '历史与统计'], ['templates', Repeat2, '重复计划']].map(([id, Icon, label]) => <button key={id} aria-label={label} className={page === id ? 'selected' : ''} onClick={() => switchPage(id)}><Icon size={19} /><span>{label}</span>{id === 'tasks' && <span className="nav-count">{state.tasks.filter(t => t.date === today && !t.completed && !t.archived).length}</span>}</button>)}
       </nav>
       <div className="sidebar-note"><span className="note-leaf"><Leaf size={21} /></span><p>不必填满每一分钟。<br />专注于眼前的一件事。</p><span className="note-line" /></div>
       <div className="sidebar-bottom"><button className={`settings-nav ${page === 'settings' ? 'selected' : ''}`} onClick={() => switchPage('settings')}><Settings size={18} />设置与备份</button><div className="offline-badge"><span />本地保存 · 离线可用<ShieldCheck size={13} /></div></div>
     </aside>
     <main className="main-content">
-      <header className="topbar"><div className="breadcrumb">我的工作台<span>/</span><strong>{{ tasks: '每日任务', history: '历史与统计', templates: '每日重复', settings: '设置与备份' }[page]}</strong></div><div className="topbar-right"><span className="today-date">{new Date(`${today}T12:00:00`).toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric' })}</span><div className="avatar">我</div></div></header>
+      <header className="topbar"><div className="breadcrumb">我的工作台<span>/</span><strong>{{ tasks: '每日任务', history: '历史与统计', templates: '重复计划', settings: '设置与备份' }[page]}</strong></div><div className="topbar-right"><span className="today-date">{new Date(`${today}T12:00:00`).toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric' })}</span><div className="avatar">我</div></div></header>
       <div className="page-content">
         {view.storageError && <div className="error-banner" role="alert">{view.storageError}</div>}
         {page === 'tasks' && <>
@@ -162,9 +164,10 @@ export default function App() {
           <div className="recorded-dates"><span>有记录的日期</span>{[...new Set(state.tasks.map(t => t.date))].sort().reverse().slice(0, 30).map(d => <button key={d} className={date === d ? 'selected' : ''} onClick={() => setDate(d)}>{d}</button>)}</div>
         </>}
         {page === 'templates' && <>
-          <PageHeading eyebrow="A LITTLE, EVERY DAY" title="把好习惯，留给每一天。" subtitle="每日模板会在当天首次打开或跨日时生成独立任务，不补造错过的日期。" action={<button className="primary" onClick={() => { setDate(today); setModal({ kind: 'create', repeat: true }); }}><Plus size={17} />新建每日任务</button>} />
-          <div className="info-banner"><Repeat2 size={18} /><p>修改模板仅影响之后生成的任务。当天和历史中的任务、用时及勾选都会保留。停用后不再生成新实例。</p></div>
-          <div className="template-grid">{state.templates.map(t => <section className={`template-card ${!t.enabled ? 'disabled-template' : ''}`} key={t.id}><div className="template-top"><span className="template-icon"><Repeat2 size={21} /></span><label className="switch" title={t.enabled ? '停用模板' : '启用模板'}><input type="checkbox" aria-label={`${t.enabled ? '停用' : '启用'}${t.title}`} checked={t.enabled} onChange={run(e => cmd({ type: 'templateEnabled', id: t.id, enabled: e.target.checked }))} /><span /></label></div><h3>{t.title}</h3><div className="task-meta"><Clock3 size={13} />{duration(t.budgetMs)}<span className="meta-dot">·</span><span className={`priority ${t.priority}`}><i />{priorities[t.priority]}</span></div><p className="template-notes">{t.notes || '每天，为重要的事留一点时间。'}</p><div className="template-footer"><span>{t.enabled ? '每日重复' : '已停用'} · {t.subtasks.length} 个子任务</span><button className="text-button" onClick={() => setModal({ kind: 'template', task: t })}><Pencil size={14} />编辑模板</button></div></section>)}</div>{!state.templates.length && <div className="empty-state large"><Repeat2 size={32} /><h3>每天想做的事，只需设置一次</h3><p>阅读、运动、学习……每天都是一个全新的开始。</p><button className="primary" onClick={() => { setDate(today); setModal({ kind: 'create', repeat: true }); }}><Plus size={16} />创建每日任务</button></div>}
+          <PageHeading eyebrow="YOUR DAYS, YOUR RHYTHM" title="让重要的事，按你的节奏发生。" subtitle="周一读书，周三运动，或每隔 3 天练习一次。把重复的事，安排得刚刚好。" action={<button className="primary" onClick={() => { setDate(today); setModal({ kind: 'create', repeat: true }); }}><Plus size={17} />新建重复计划</button>} />
+          <div className="info-banner"><Repeat2 size={18} /><p>指定星期或间隔天数，任务会在符合规则的当天出现。修改计划不改动已有任务和历史；停用只停止之后的安排。</p></div>
+          <section className="week-overview"><div className="week-overview-heading"><h2><CalendarDays size={17} />未来 7 天</h2><span>安排预览 · 当天打开软件时加入任务清单</span></div><div className="week-overview-grid">{Array.from({ length: 7 }, (_, i) => { const day = dayShift(today, i), planned = state.templates.filter(t => isDue(t, day)); return <div key={day} className={`week-day ${i === 0 ? 'today' : ''}`}><div><strong>{i === 0 ? '今天' : WEEKDAYS[weekday(day) - 1]}</strong><span>{day.slice(5).replace('-', '/')}</span></div>{planned.map(t => <button key={t.id} title={`编辑${t.title}的重复安排`} onClick={() => setModal({ kind: 'template', task: t })}>{t.title}</button>)}{!planned.length && <span className="no-plan">自由安排</span>}</div>; })}</div></section>
+          <div className="template-grid">{state.templates.map(t => <section className={`template-card ${!t.enabled ? 'disabled-template' : ''}`} key={t.id}><div className="template-top"><span className="template-icon"><Repeat2 size={21} /></span><label className="switch" title={t.enabled ? '停用计划' : '启用计划'}><input type="checkbox" aria-label={`${t.enabled ? '停用' : '启用'}${t.title}`} checked={t.enabled} onChange={run(e => cmd({ type: 'templateEnabled', id: t.id, enabled: e.target.checked }))} /><span /></label></div><h3>{t.title}</h3><div className="schedule-badge">{scheduleLabel(t.schedule)}</div><div className="task-meta"><Clock3 size={13} />{duration(t.budgetMs)}<span className="meta-dot">·</span><span className={`priority ${t.priority}`}><i />{priorities[t.priority]}</span></div><p className="template-notes">{t.notes || '按自己的节奏，把重要的事坚持下去。'}</p><div className="template-dates"><span>开始于 {t.startDate}</span><span>{t.enabled ? `近期：${nextOccurrences(t, today).map(d => d.slice(5).replace('-', '/')).join('、') || '没有后续日期'}` : '已停用，已有任务和历史保留'}</span></div><div className="template-footer"><span>{t.enabled ? '已启用' : '已停用'} · {t.subtasks.length} 个子任务</span><button className="text-button" onClick={() => setModal({ kind: 'template', task: t })}><Pencil size={14} />编辑计划</button></div></section>)}</div>{!state.templates.length && <div className="empty-state large"><Repeat2 size={32} /><h3>想定期做的事，只需安排一次</h3><p>选好星期，或者设定间隔，从一个好习惯开始。</p><button className="primary" onClick={() => { setDate(today); setModal({ kind: 'create', repeat: true }); }}><Plus size={16} />创建重复计划</button></div>}
         </>}
         {page === 'settings' && <>
           <PageHeading eyebrow="YOUR OWN QUIET SPACE" title="安心专注，数据留在身边。" subtitle="无需账号、订阅或网络，所有任务和专注记录只存储在这台电脑。" />
@@ -174,7 +177,7 @@ export default function App() {
         </>}
       </div>
     </main>
-    {modal && ['create', 'edit', 'template'].includes(modal.kind) && <TaskForm key={`${modal.kind}-${modal.task?.id || 'new'}`} modal={modal} date={date} state={state} onClose={() => setModal(null)} onSave={run(async fields => { await cmd({ type: modal.kind === 'template' ? 'template' : modal.kind === 'edit' ? 'edit' : 'create', id: modal.task?.id, date, fields, repeat: fields.repeat }); setModal(null); notify(modal.kind === 'template' ? '模板已保存，之后生成的任务将使用新设置' : '任务已保存'); })} />}
+    {modal && ['create', 'edit', 'template'].includes(modal.kind) && <TaskForm key={`${modal.kind}-${modal.task?.id || 'new'}`} modal={modal} date={date} today={today} state={state} onClose={() => setModal(null)} onSave={run(async fields => { await cmd({ type: modal.kind === 'template' ? 'template' : modal.kind === 'edit' ? 'edit' : 'create', id: modal.task?.id, date, fields, repeat: fields.repeat, schedule: fields.schedule, startDate: fields.startDate }); setModal(null); notify(modal.kind === 'template' || fields.repeat ? '重复计划已保存，任务会按规则在对应日期出现' : '任务已保存'); })} />}
     {modal?.kind === 'help' && <Modal title="给专注留一点空间" onClose={() => setModal(null)}><div className="help-content"><p>① 新建任务，填入整项任务的预计时长，点击“开始”进入全屏。</p><p>② 全屏中按 <kbd>Esc</kbd> 返回清单，计时继续；按 <kbd>空格</kbd> 暂停或继续。</p><p>③ 到零只提醒一次，随后继续显示带 + 号的超时。不会自动完成或跳到下一项。</p><p>④ “结束本次”保存用时，任务保持未完成；“完成任务”保存并勾选完成。再次开始接着使用剩余预算。</p><p>⑤ 关闭和休眠会暂停；重开后手动继续。每 2 秒保存进度，异常退出最多丢失最近 2 秒。</p><p>⑥ 重要记录请在“设置与备份”中定期导出。重复模板与每天任务独立，编辑模板不改变历史。</p><p>⑦ 使用右上方日期切换和“历史与统计”查看往日任务。任务的预计时长在第一次开始后固定。</p></div><button className="primary full-width" onClick={() => setModal(null)}>明白了</button></Modal>}
     {modal?.kind === 'record' && <Modal title={modal.task.title} onClose={() => setModal(null)}><p className="muted">归属 {modal.task.date} · {priorities[modal.task.priority]}{modal.task.archived ? ' · 已归档' : ''}</p><p className="record-notes">{modal.task.notes || '无备注'}</p>{modal.task.subtasks.map(s => <div className="subtask-line" key={s.id}>{s.done ? <CircleCheck size={16} /> : <Square size={16} />}<span>{s.title}</span></div>)}<h3 className="record-section-title">计时片段</h3>{state.sessions.filter(s => s.taskId === modal.task.id).map(s => <div className="session-line" key={s.id}><span>{new Date(s.startedAt).toLocaleString('zh-CN')}<small>{s.endedAt ? '已结束' : '当前片段'}</small></span><strong>{clock(s.elapsedMs, true).slice(1)}</strong></div>)}{!state.sessions.some(s => s.taskId === modal.task.id) && <p className="muted">还没有计时记录</p>}<button className="secondary full-width" onClick={() => { setDate(modal.task.date); setPage('tasks'); setShowArchived(modal.task.archived); setExpanded(modal.task.id); setModal(null); }}>前往当天任务</button></Modal>}
     {hintAction && <Modal title="一段安静的专注时间" onClose={() => setHintAction(null)}><div className="shortcut-help"><div><kbd>Esc</kbd><span>退出全屏，计时继续</span></div><div><kbd>空格</kbd><span>暂停或继续计时</span></div></div><p className="muted">全屏只显示计时数字。你可以随时切换应用，回来后从清单返回全屏。</p><button className="primary full-width" onClick={run(async () => { const action = hintAction; await cmd({ type: 'settings', fullscreenHintSeen: true }); setHintAction(null); await action(); })}><Play size={16} />开始专注</button></Modal>}
@@ -203,25 +206,41 @@ function Modal({ title, children, onClose }) {
   }, []);
   return <div className="modal-backdrop" onMouseDown={e => { if (e.target === e.currentTarget) onClose(); }}><section className="modal" role="dialog" aria-modal="true" aria-label={title} ref={panel}><div className="modal-heading"><h2>{title}</h2><button className="icon-button" aria-label="关闭弹窗" onClick={onClose}><X size={20} /></button></div>{children}</section></div>;
 }
-function TaskForm({ modal, date, state, onClose, onSave }) {
+function TaskForm({ modal, date, today, state, onClose, onSave }) {
   const task = modal.task;
   const [title, setTitle] = useState(task?.title || ''), [minutes, setMinutes] = useState(task ? task.budgetMs / 60000 : 25);
   const [priority, setPriority] = useState(task?.priority || 'medium'), [notes, setNotes] = useState(task?.notes || '');
   const [subtasks, setSubtasks] = useState(task?.subtasks || []), [repeat, setRepeat] = useState(Boolean(modal.repeat)), [saving, setSaving] = useState(false);
+  const [kind, setKind] = useState(task?.schedule?.kind || 'daily');
+  const [weekdays, setWeekdays] = useState(task?.schedule?.weekdays || [weekday(today)]);
+  const [everyDays, setEveryDays] = useState(task?.schedule?.everyDays || 3);
+  const [startDate, setStartDate] = useState(task?.startDate || today), [formError, setFormError] = useState('');
+  const repeating = modal.kind === 'template' || (modal.kind === 'create' && repeat);
+  const schedule = kind === 'weekly' ? { kind, weekdays } : kind === 'interval' ? { kind, everyDays: Number(everyDays) } : { kind };
+  let preview = [];
+  if (repeating) { try { preview = nextOccurrences({ enabled: true, schedule, startDate }, today); } catch { /* Show validation below the form on submit. */ } }
   const moveSubtask = (index, delta) => {
     const next = [...subtasks]; [next[index], next[index + delta]] = [next[index + delta], next[index]]; setSubtasks(next);
   };
   const locked = modal.kind === 'edit' && state.sessions.some(s => s.taskId === task.id);
-  return <Modal title={modal.kind === 'template' ? '编辑每日模板' : task ? '编辑任务' : '给重要的事留点时间'} onClose={onClose}>
-    <form onSubmit={async e => { e.preventDefault(); if (saving) return; setSaving(true); try { await onSave({ title, budgetMs: Math.round(Number(minutes) * 60000), priority, notes, subtasks: subtasks.filter(s => s.title.trim()), repeat }); } finally { setSaving(false); } }}>
+  return <Modal title={modal.kind === 'template' ? '编辑重复计划' : task ? '编辑任务' : '给重要的事留点时间'} onClose={onClose}>
+    <form onSubmit={async e => { e.preventDefault(); if (saving) return; setFormError(''); try { if (repeating) { validateSchedule(schedule); validateDate(startDate); } } catch (error) { setFormError(error.message); return; } setSaving(true); try { await onSave({ title, budgetMs: Math.round(Number(minutes) * 60000), priority, notes, subtasks: subtasks.filter(s => s.title.trim()), repeat, schedule, startDate }); } finally { setSaving(false); } }}>
       <label className="field"><span>任务名称</span><input autoFocus required maxLength={200} placeholder="比如：读完书的一个章节" value={title} onChange={e => setTitle(e.target.value)} /></label>
       <div className="form-columns"><label className="field"><span>预计时长 <small>分钟</small></span><input type="number" required min="1" max="10080" step="1" value={minutes} disabled={locked} onChange={e => setMinutes(e.target.value)} /></label><label className="field"><span>优先级</span><select value={priority} onChange={e => setPriority(e.target.value)}><option value="high">高优先级</option><option value="medium">中优先级</option><option value="low">低优先级</option></select></label></div>
       {locked && <p className="field-tip">已开始的任务固定总预算，多次计时共用剩余时间。</p>}
       <label className="field"><span>备注 <small>选填</small></span><textarea rows={3} maxLength={20000} placeholder="写下想法、资料或需要注意的事…" value={notes} onChange={e => setNotes(e.target.value)} /></label>
       <div className="field"><span>子任务 <small>拆成小步，更容易开始</small></span><div className="subtask-editor">{subtasks.map((s, index) => <div key={s.id}><span className="subtask-number">{index + 1}</span><input aria-label={`子任务${index + 1}`} maxLength={200} placeholder="一个小步骤" value={s.title} onChange={e => setSubtasks(subtasks.map(x => x.id === s.id ? { ...x, title: e.target.value } : x))} /><button type="button" className="icon-button" disabled={index === 0} aria-label={`上移子任务${index + 1}`} onClick={() => moveSubtask(index, -1)}><ArrowUp size={13} /></button><button type="button" className="icon-button" disabled={index === subtasks.length - 1} aria-label={`下移子任务${index + 1}`} onClick={() => moveSubtask(index, 1)}><ArrowDown size={13} /></button><button type="button" className="icon-button" aria-label={`删除子任务${index + 1}`} onClick={() => setSubtasks(subtasks.filter(x => x.id !== s.id))}><X size={15} /></button></div>)}</div><button type="button" className="text-button" disabled={subtasks.length >= 100} onClick={() => setSubtasks([...subtasks, { id: crypto.randomUUID(), title: '', done: false }])}><Plus size={14} />添加子任务</button></div>
-      {modal.kind === 'create' && <label className="repeat-option"><input type="checkbox" checked={repeat} onChange={e => setRepeat(e.target.checked)} /><Repeat2 size={17} /><div><strong>每天重复</strong><span>从今天起，每天生成独立任务</span></div></label>}
+      {modal.kind === 'create' && <label className="repeat-option"><input type="checkbox" checked={repeat} onChange={e => setRepeat(e.target.checked)} /><Repeat2 size={17} /><div><strong>设为重复任务</strong><span>支持每天、指定星期或每隔几天</span></div></label>}
+      {repeating && <fieldset className="schedule-editor"><legend>重复安排</legend>
+        <div className="form-columns"><label className="field"><span>重复频率</span><select value={kind} onChange={e => { setKind(e.target.value); setFormError(''); }}><option value="daily">每天</option><option value="weekly">每周指定星期</option><option value="interval">每隔几天</option></select></label><label className="field"><span>开始日期</span><input type="date" required value={startDate} onChange={e => setStartDate(e.target.value)} /></label></div>
+        {kind === 'weekly' && <div className="weekday-field"><span>在哪些星期重复？可多选</span><div className="weekday-buttons" role="group" aria-label="选择星期">{WEEKDAYS.map((label, i) => <button type="button" key={label} aria-pressed={weekdays.includes(i + 1)} onClick={() => { setWeekdays(current => current.includes(i + 1) ? current.filter(d => d !== i + 1) : [...current, i + 1].sort((a, b) => a - b)); setFormError(''); }}>{label}</button>)}</div></div>}
+        {kind === 'interval' && <label className="field interval-field"><span>间隔天数</span><div><span>每</span><input type="number" min="1" max="3650" step="1" required aria-label="间隔天数" value={everyDays} onChange={e => setEveryDays(e.target.value)} /><span>天出现一次</span></div><small>以开始日期为准。每 3 天一次，例如 25 日、28 日、31 日。</small></label>}
+        <div className="schedule-preview"><CalendarDays size={15} /><div><strong>近期安排</strong><span>{preview.length ? preview.map(d => `${d}（${WEEKDAYS[weekday(d) - 1]}）`).join('、') : '请选择有效规则和开始日期'}</span></div></div>
+        <p className="schedule-hint">符合规则的当天打开软件时，任务会自动出现在清单中；不会补造错过的日期。</p>
+      </fieldset>}
       {modal.kind === 'template' && <p className="field-tip">修改仅影响之后生成的实例，不改动今天与历史任务。</p>}
-      <div className="form-footer"><span>{modal.kind === 'template' ? '每日重复模板' : `任务日期 ${date}`}</span><div><button type="button" className="secondary" onClick={onClose}>取消</button><button type="submit" className="primary" disabled={saving}>{saving ? '保存中…' : task ? '保存修改' : '创建任务'}</button></div></div>
+      {formError && <p className="form-error" role="alert">{formError}</p>}
+      <div className="form-footer"><span>{repeating ? `开始于 ${startDate}` : `任务日期 ${date}`}</span><div><button type="button" className="secondary" onClick={onClose}>取消</button><button type="submit" className="primary" disabled={saving}>{saving ? '保存中…' : task ? '保存修改' : repeating ? '创建计划' : '创建任务'}</button></div></div>
     </form>
   </Modal>;
 }

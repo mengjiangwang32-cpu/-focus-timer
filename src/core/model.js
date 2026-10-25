@@ -1,10 +1,10 @@
 import { randomUUID } from 'node:crypto';
+import { localDate, validateDate } from './calendar.js';
+import { validateSchedule } from './schedule.js';
+export { localDate, validateDate } from './calendar.js';
 
 export const uid = () => randomUUID();
-export function localDate(date = new Date()) {
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
-}
-export const blankState = () => ({ schemaVersion: 1, tasks: [], templates: [], sessions: [], active: null, settings: { sound: true, fullscreenHintSeen: false } });
+export const blankState = () => ({ schemaVersion: 2, tasks: [], templates: [], sessions: [], active: null, settings: { sound: true, fullscreenHintSeen: false } });
 export const actualMs = (state, taskId) => state.sessions.reduce((n, s) => n + (s.taskId === taskId ? s.elapsedMs : 0), 0);
 export function summary(state, date) {
   const tasks = state.tasks.filter(t => t.date === date);
@@ -14,12 +14,6 @@ export function summary(state, date) {
   }, { count: 0, completed: 0, budgetMs: 0, actualMs: 0, overtimeMs: 0 });
 }
 
-export function validateDate(value) {
-  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) throw new Error('日期格式不正确');
-  const d = new Date(`${value}T12:00:00`);
-  if (!Number.isFinite(d.getTime()) || localDate(d) !== value) throw new Error('日期无效');
-  return value;
-}
 const text = (value, max, label) => {
   if (typeof value !== 'string' || value.length > max) throw new Error(`${label}格式或长度不正确`);
   return value;
@@ -43,8 +37,17 @@ export function taskFields(input) {
 
 // Validate the entire graph before replacing any live data. No partial imports.
 export function validateState(data) {
-  if (!data || data.schemaVersion !== 1) throw new Error('不支持的备份版本');
+  if (!data || ![1, 2].includes(data.schemaVersion)) {
+    const error = new Error('不支持的数据或备份版本，请使用对应的新版本软件打开');
+    error.code = Number.isInteger(data?.schemaVersion) && data.schemaVersion > 2 ? 'UNSUPPORTED_SCHEMA' : 'INVALID_SCHEMA'; throw error;
+  }
+  data = structuredClone(data);
   for (const key of ['tasks', 'templates', 'sessions']) if (!Array.isArray(data[key]) || data[key].length > 100000) throw new Error('备份结构无效');
+  if (data.schemaVersion === 1) {
+    // Version 1 only had daily templates. Preserve all IDs and historical data.
+    for (const template of data.templates) template.schedule = { kind: 'daily' };
+    data.schemaVersion = 2;
+  }
   const ids = new Set();
   const identity = id => { text(id, 100, '标识'); if (!id || ids.has(id)) throw new Error('备份标识重复或为空'); ids.add(id); };
   const validFields = x => {
@@ -53,7 +56,7 @@ export function validateState(data) {
     text(x.createdAt, 100, '创建时间');
     if (!Number.isFinite(Date.parse(x.createdAt))) throw new Error('创建时间无效');
   };
-  for (const t of data.templates) { identity(t.id); validFields(t); bool(t.enabled); validateDate(t.startDate); }
+  for (const t of data.templates) { identity(t.id); validFields(t); bool(t.enabled); validateDate(t.startDate); t.schedule = validateSchedule(t.schedule); }
   const templateIds = new Set(data.templates.map(t => t.id));
   const dailyIds = new Set();
   for (const t of data.tasks) {

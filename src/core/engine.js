@@ -1,4 +1,5 @@
 import { actualMs, blankState, localDate, taskFields, uid, validateDate, validateState } from './model.js';
+import { isDue, validateSchedule } from './schedule.js';
 
 export class FocusEngine {
   constructor(state = blankState(), { monotonic = () => performance.now(), wall = () => new Date() } = {}) {
@@ -32,7 +33,7 @@ export class FocusEngine {
     const date = localDate(this.wall());
     let changed = false;
     for (const t of this.state.templates) {
-      if (t.enabled && t.startDate <= date && !this.state.tasks.some(x => x.templateId === t.id && x.date === date)) {
+      if (isDue(t, date) && !this.state.tasks.some(x => x.templateId === t.id && x.date === date)) {
         this.state.tasks.push(this.fromTemplate(t, date)); changed = true;
       }
     }
@@ -52,12 +53,14 @@ export class FocusEngine {
       case 'create': {
         const fields = taskFields(command.fields);
         const date = validateDate(command.date);
-        let templateId = null;
         if (command.repeat) {
-          const template = { ...fields, subtasks: fields.subtasks.map(s => ({ ...s, id: uid(), done: false })), id: uid(), enabled: true, startDate: localDate(this.wall()), createdAt: this.now() };
-          templateId = template.id; this.state.templates.push(template);
+          const schedule = validateSchedule(command.schedule ?? { kind: 'daily' });
+          const startDate = validateDate(command.startDate ?? localDate(this.wall()));
+          const template = { ...fields, subtasks: fields.subtasks.map(s => ({ ...s, id: uid(), done: false })), id: uid(), enabled: true, schedule, startDate, createdAt: this.now() };
+          this.state.templates.push(template);
+        } else {
+          this.state.tasks.push({ ...fields, id: uid(), date, templateId: null, completed: false, archived: false, alerted: false, createdAt: this.now() });
         }
-        this.state.tasks.push({ ...fields, id: uid(), date, templateId, completed: false, archived: false, alerted: false, createdAt: this.now() });
         this.ensureToday(); break;
       }
       case 'edit': {
@@ -105,8 +108,12 @@ export class FocusEngine {
       case 'template': {
         const t = this.state.templates.find(t => t.id === id);
         if (!t) throw new Error('模板不存在');
-        Object.assign(t, taskFields(command.fields));
+        const fields = taskFields(command.fields);
+        const schedule = validateSchedule(command.schedule ?? t.schedule);
+        const startDate = validateDate(command.startDate ?? t.startDate);
+        Object.assign(t, fields, { schedule, startDate });
         t.subtasks = t.subtasks.map(s => ({ ...s, done: false }));
+        this.ensureToday();
         break;
       }
       case 'templateEnabled': {

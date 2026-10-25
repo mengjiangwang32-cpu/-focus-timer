@@ -39,8 +39,8 @@ test('T01/T02/T12/T13: desktop form, persistence, drag ordering and daily templa
   await page.getByRole('button', { name: '添加子任务', exact: true }).click();
   await page.getByRole('textbox', { name: '子任务2', exact: true }).fill('写下三条笔记');
   await page.getByRole('button', { name: '上移子任务2', exact: true }).click();
-  await page.getByLabel('每天重复').check();
-  await page.getByRole('button', { name: '创建任务', exact: true }).click();
+  await page.getByLabel('设为重复任务').check();
+  await page.getByRole('button', { name: '创建计划', exact: true }).click();
   await expect(page.getByText('阅读一本书', { exact: true })).toBeVisible();
   const first = (await state()).tasks[0];
   expect(first.budgetMs).toBe(2400000); expect(first.priority).toBe('high');
@@ -51,7 +51,7 @@ test('T01/T02/T12/T13: desktop form, persistence, drag ordering and daily templa
   const recovered = await state(); expect(recovered.tasks).toHaveLength(2); expect(recovered.tasks[0].title).toBe('整理笔记');
   expect(recovered.tasks[1].notes).toContain('三条想法'); expect(recovered.tasks[1].subtasks.map(s => s.title)).toEqual(['写下三条笔记', '阅读第一章']);
   expect(recovered.templates).toHaveLength(1);
-  await page.getByRole('button', { name: '每日重复', exact: true }).click();
+  await page.getByRole('button', { name: '重复计划', exact: true }).click();
   await expect(page.getByRole('heading', { name: '阅读一本书', exact: true })).toBeVisible();
 });
 
@@ -158,10 +158,10 @@ test('T19/T20: actual IPC export/import, invalid-file protection and offline wor
 });
 
 test('T14: editing and stopping a template leaves today snapshot untouched', async () => {
-  await page.getByRole('button', { name: '每日重复', exact: true }).click();
-  await page.getByRole('button', { name: '新建每日任务', exact: true }).click();
-  await page.getByLabel('任务名称').fill('每日阅读'); await page.getByRole('button', { name: '创建任务', exact: true }).click();
-  await page.getByRole('button', { name: '编辑模板', exact: true }).click();
+  await page.getByRole('button', { name: '重复计划', exact: true }).click();
+  await page.getByRole('button', { name: '新建重复计划', exact: true }).click();
+  await page.getByLabel('任务名称').fill('每日阅读'); await page.getByRole('button', { name: '创建计划', exact: true }).click();
+  await page.getByRole('button', { name: '编辑计划', exact: true }).click();
   await page.getByLabel('任务名称').fill('每日写作'); await page.getByLabel('预计时长').fill('45');
   await page.getByRole('button', { name: '保存修改', exact: true }).click();
   await page.getByRole('checkbox', { name: '停用每日写作', exact: true }).click();
@@ -206,6 +206,86 @@ test('capture Chinese desktop layout and check renderer has no runtime errors', 
   await command({ type: 'complete', id: walk.id, completed: true });
   fs.mkdirSync('docs/screenshots', { recursive: true });
   await page.screenshot({ path: 'docs/screenshots/每日任务.png' });
-  for (const name of ['历史与统计', '每日重复', '设置与备份', '每日任务']) await page.getByRole('button', { name, exact: true }).click();
+  for (const name of ['历史与统计', '重复计划', '设置与备份', '每日任务']) await page.getByRole('button', { name, exact: true }).click();
   expect(errors).toEqual([]);
+});
+
+test('weekly plan selects weekdays, validates empty selections, previews and persists without off-day tasks', async () => {
+  const today = await page.evaluate(async () => (await window.focusApp.getState()).value.today);
+  const current = new Date(`${today}T12:00:00Z`).getUTCDay() || 7;
+  const next = current % 7 + 1;
+  const labels = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
+  await page.getByRole('button', { name: '重复计划', exact: true }).click();
+  await page.getByRole('button', { name: '新建重复计划', exact: true }).click();
+  await page.getByLabel('任务名称').fill('每周的阅读安排');
+  await page.getByLabel('重复频率').selectOption('weekly');
+  await page.getByRole('button', { name: labels[current - 1], exact: true }).click();
+  await page.getByRole('button', { name: '创建计划', exact: true }).click();
+  await expect(page.getByRole('alert')).toContainText('至少选择');
+  expect((await state()).templates).toHaveLength(0);
+  await page.getByRole('button', { name: labels[next - 1], exact: true }).click();
+  await page.getByRole('button', { name: '创建计划', exact: true }).click();
+  await expect(page.getByRole('heading', { name: '每周的阅读安排', exact: true })).toBeVisible();
+  let s = await state(); expect(s.tasks).toHaveLength(0); expect(s.templates[0].schedule).toEqual({ kind: 'weekly', weekdays: [next] });
+  await expect(page.locator('.week-overview-grid')).toContainText('每周的阅读安排');
+  await desktop.close(); await launch();
+  s = await state(); expect(s.templates).toHaveLength(1); expect(s.tasks).toHaveLength(0);
+  await page.getByRole('button', { name: '重复计划', exact: true }).click();
+  await page.getByRole('button', { name: '编辑计划', exact: true }).click();
+  await expect(page.getByRole('button', { name: labels[next - 1], exact: true })).toHaveAttribute('aria-pressed', 'true');
+});
+
+test('interval plan anchors to its start date; editing creates today once and preserves its snapshot', async () => {
+  const today = await page.evaluate(async () => (await window.focusApp.getState()).value.today);
+  const tomorrow = new Date(`${today}T12:00:00Z`); tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
+  const start = tomorrow.toISOString().slice(0, 10);
+  await page.getByRole('button', { name: '重复计划', exact: true }).click();
+  await page.getByRole('button', { name: '新建重复计划', exact: true }).click();
+  await page.getByLabel('任务名称').fill('每三天运动');
+  await page.getByLabel('重复频率').selectOption('interval');
+  await page.getByLabel('间隔天数', { exact: true }).fill('3');
+  await page.getByLabel('开始日期').fill(start);
+  await expect(page.locator('.schedule-preview')).toContainText(start);
+  await page.getByRole('button', { name: '创建计划', exact: true }).click();
+  await expect(page.locator('.schedule-badge')).toHaveText('每 3 天一次');
+  expect((await state()).tasks).toHaveLength(0);
+  await page.getByRole('button', { name: '编辑计划', exact: true }).click();
+  await page.getByLabel('开始日期').fill(today);
+  await page.getByRole('button', { name: '保存修改', exact: true }).click();
+  await expect.poll(async () => (await state()).tasks.length).toBe(1);
+  const original = structuredClone((await state()).tasks[0]);
+  await page.getByRole('button', { name: '编辑计划', exact: true }).click();
+  await page.getByLabel('任务名称').fill('新版运动安排');
+  await page.getByLabel('间隔天数', { exact: true }).fill('5');
+  await page.getByRole('button', { name: '保存修改', exact: true }).click();
+  expect((await state()).tasks[0]).toEqual(original);
+  await desktop.close(); await launch();
+  expect((await state()).tasks).toHaveLength(1); expect((await state()).templates[0].schedule.everyDays).toBe(5);
+  await page.getByRole('button', { name: '重复计划', exact: true }).click();
+  fs.mkdirSync('docs/screenshots', { recursive: true });
+  await page.screenshot({ path: 'docs/screenshots/重复计划.png', fullPage: true });
+});
+
+test('v1 data opens as v2 with exact upgrade backup, historical time preserved and no duplicate daily tasks', async () => {
+  const today = await page.evaluate(async () => (await window.focusApp.getState()).value.today);
+  const previous = new Date(`${today}T12:00:00Z`); previous.setUTCDate(previous.getUTCDate() - 1);
+  const yesterday = previous.toISOString().slice(0, 10), createdAt = `${yesterday}T10:00:00.000Z`;
+  await desktop.close();
+  const common = { title: '旧版的任务', budgetMs: 60000, notes: '升级后仍保留这段备注', priority: 'high', createdAt };
+  const legacy = { schemaVersion: 1,
+    templates: [{ ...common, id: 'legacy-template', enabled: true, startDate: yesterday, subtasks: [{ id: 'template-child', title: '旧版子项', done: false }] }],
+    tasks: [{ ...common, id: 'legacy-task', date: yesterday, templateId: 'legacy-template', archived: false, completed: false, alerted: false, subtasks: [{ id: 'task-child', title: '旧版子项', done: true }] }],
+    sessions: [{ id: 'legacy-session', taskId: 'legacy-task', elapsedMs: 20000, startedAt: createdAt, endedAt: null }],
+    active: { taskId: 'legacy-task', sessionId: 'legacy-session', paused: false }, settings: { sound: false, fullscreenHintSeen: true }
+  };
+  const raw = JSON.stringify(legacy, null, 2); fs.writeFileSync(path.join(directory, 'data', 'focus-data.json'), raw);
+  await launch();
+  const s = await state(); expect(s.schemaVersion).toBe(2); expect(s.tasks).toHaveLength(2);
+  expect(s.tasks.find(t => t.id === 'legacy-task')).toEqual(legacy.tasks[0]);
+  expect(s.sessions).toEqual(legacy.sessions); expect(s.settings).toEqual(legacy.settings); expect(s.active.paused).toBe(true);
+  expect(s.templates[0].schedule).toEqual({ kind: 'daily' });
+  const backups = fs.readdirSync(path.join(directory, 'data')).filter(f => f.startsWith('before-v2-'));
+  expect(backups).toHaveLength(1); expect(fs.readFileSync(path.join(directory, 'data', backups[0]), 'utf8')).toBe(raw);
+  await desktop.close(); await launch();
+  expect((await state()).tasks).toHaveLength(2); expect((await state()).sessions[0].elapsedMs).toBe(20000);
 });
